@@ -1,9 +1,11 @@
+import hashlib
 import math
 import random
 import re
 import string
 from google import genai
 import matplotlib.pyplot as plt
+import requests
 import streamlit as st
 
 # 한글 폰트 마이너스 기호 깨짐 방지
@@ -159,7 +161,6 @@ class AdvancedPasswordAnalyzer:
     if not self.client:
       return '💡 [LLM 피드백 안내]: API 클라이언트가 초기화되지 않았습니다.'
 
-    # 문법 오류 방지를 위해 일반 문자열 포맷팅 사용
     prompt = (
         '당신은 정보보호 전문가이자 수석 보안 컨설턴트입니다.\n'
         '사용자가 입력한 비밀번호 분석 데이터입니다.\n\n'
@@ -203,13 +204,37 @@ class AdvancedPasswordAnalyzer:
     return ''.join(password_list)
 
 
+def check_pwned_password(password):
+  """HaveIBeenPwned API를 활용한 k-Anonymity 기반 비밀번호 유출 검사"""
+  if not password:
+    return None, 0
+
+  sha1_pass = hashlib.sha1(password.encode('utf-8')).hexdigest().upper()
+  prefix, tail = sha1_pass[:5], sha1_pass[5:]
+
+  url = f'https://api.pwnedpasswords.com/range/{prefix}'
+  try:
+    response = requests.get(url)
+    if response.status_code != 200:
+      return None, 'API 연결 오류'
+
+    hashes = (line.split(':') for line in response.text.splitlines())
+    for h, count in hashes:
+      if h == tail:
+        return True, int(count)
+
+    return False, 0
+  except Exception as e:
+    return None, str(e)
+
+
 # --- Streamlit 웹 UI 레이아웃 ---
 analyzer = AdvancedPasswordAnalyzer()
 
 st.title('🛡️ 지능형 비밀번호 보안 분석 시스템')
 st.markdown(
-    '섀넌 엔트로피 알고리즘, RTX 4090 시뮬레이션, Gemini LLM이 결합된 보안'
-    ' 솔루션입니다.'
+    '섀넌 엔트로피 알고리즘, RTX 4090 시뮬레이션, Gemini LLM, 다크웹 유출'
+    ' 검사가 결합된 보안 솔루션입니다.'
 )
 st.markdown('---')
 
@@ -254,10 +279,12 @@ if analyze_clicked:
 
     st.success('✨ 분석 완료!')
 
-    tab1, tab2, tab3 = st.tabs([
+    # 탭 메뉴에 '🌐 다크웹 유출 검사' 추가!
+    tab1, tab2, tab3, tab4 = st.tabs([
         '📊 종합 대시보드',
         '🔬 엔트로피 분석',
         '🤖 AI 컨설팅 & 추천',
+        '🌐 다크웹 유출 검사',
     ])
 
     with tab1:
@@ -318,3 +345,28 @@ if analyze_clicked:
       st.markdown('---')
       st.subheader('🛡️ 추천 안전 비밀번호')
       st.code(recommended_pwd, language='text')
+
+    with tab4:
+      st.subheader('🌐 글로벌 다크웹 유출 이력 검사 (k-Anonymity)')
+      st.markdown(
+          'HaveIBeenPwned API와 k-익명성 알고리즘을 활용하여, **비밀번호'
+          ' 평문이나 전체 해시값을 노출하지 않고** 전 세계 해킹 DB 유출 이력을'
+          ' 안전하게 조회합니다.'
+      )
+
+      with st.spinner('해킹 데이터베이스 대조 중...'):
+        is_pwned, count = check_pwned_password(password)
+
+      if is_pwned is True:
+        st.error(
+            f'🚨 **위험 감지!** 이 비밀번호는 전 세계 유출 데이터베이스에'
+            f' **{count:,}회** 노출된 적이 있습니다! 이미 해커들의 사전(Dictionary)에'
+            ' 등록된 취약한 패스워드입니다.'
+        )
+      elif is_pwned is False:
+        st.success(
+            '🎉 **안전!** 글로벌 다크웹 유출 데이터베이스에서 일치하는 기록이'
+            ' 발견되지 않았습니다.'
+        )
+      else:
+        st.warning(f'⚠️ 유출 검사 중 통신 오류가 발생했습니다: {count}')
